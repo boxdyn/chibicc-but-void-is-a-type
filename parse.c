@@ -484,7 +484,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
     // Handle built-in types.
     if (equal(tok, "void"))
       counter += VOID;
-    else if (equal(tok, "_Bool"))
+    else if (equal(tok, "_Bool") || equal(tok, "bool")) // C23 bool
       counter += BOOL;
     else if (equal(tok, "char"))
       counter += CHAR;
@@ -1499,7 +1499,7 @@ static bool is_typename(Token *tok) {
       "typedef", "enum", "static", "extern", "_Alignas", "signed", "unsigned",
       "const", "volatile", "auto", "register", "restrict", "__restrict",
       "__restrict__", "_Noreturn", "float", "double", "typeof", "inline",
-      "_Thread_local", "__thread", "_Atomic",
+      "_Thread_local", "__thread", "_Atomic", "bool", // C23 bool
     };
 
     for (int i = 0; i < sizeof(kw) / sizeof(*kw); i++)
@@ -3098,6 +3098,18 @@ static Node *primary(Token **rest, Token *tok) {
     if (equal(tok->next, "("))
       error_tok(tok, "implicit declaration of a function");
     error_tok(tok, "undefined variable");
+  }
+
+  if (equal(tok, "true")) { // C23 bool
+    Node *node = new_num(1, tok);
+    *rest = tok->next;
+    return node;
+  }
+
+  if (equal(tok, "false")) { // C23 bool
+    Node *node = new_num(0, tok);
+    *rest = tok->next;
+    return node;
   }
 
   if (tok->kind == TK_STR) {
