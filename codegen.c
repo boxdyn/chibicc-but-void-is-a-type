@@ -215,7 +215,9 @@ static void load(Type *ty) {
   // a register always contains a valid value. The upper half of a
   // register for char, short and int may contain garbage. When we load
   // a long value to a register, it simply occupies the entire register.
-  if (ty->size == 1)
+  if (ty->size == 0)
+    return;  // loads from ZSTs, such as `void`, have no observable effects
+  else if (ty->size == 1)
     println("  %sbl (%%rax), %%eax", insn);
   else if (ty->size == 2)
     println("  %swl (%%rax), %%eax", insn);
@@ -248,7 +250,9 @@ static void store(Type *ty) {
     return;
   }
 
-  if (ty->size == 1)
+  if (ty->size == 0)
+    return; // Stores to ZSTs, such as `void`, have no observable effects
+  else if (ty->size == 1)
     println("  mov %%al, (%%rdi)");
   else if (ty->size == 2)
     println("  mov %%ax, (%%rdi)");
@@ -281,10 +285,12 @@ static void cmp_zero(Type *ty) {
     println("  cmp $0, %%rax");
 }
 
-enum { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80 };
+enum { V0, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80 };
 
 static int getTypeId(Type *ty) {
   switch (ty->kind) {
+  case TY_VOID:
+    return V0;
   case TY_CHAR:
     return ty->is_unsigned ? U8 : I8;
   case TY_SHORT:
@@ -304,6 +310,11 @@ static int getTypeId(Type *ty) {
 }
 
 // The table for type casts
+static char v0int[] = "xor %eax, %eax";
+static char v0f32[] = "xor %eax, %eax; cvtsi2ssl %eax, %xmm0";
+static char v0f64[] = "xor %eax, %eax; cvtsi2sdl %eax, %xmm0";
+static char v0f80[] = "xor %eax, %eax; mov %eax, -4(%rsp); fildl -4(%rsp)";
+
 static char i32i8[] = "movsbl %al, %eax";
 static char i32u8[] = "movzbl %al, %eax";
 static char i32i16[] = "movswl %ax, %eax";
@@ -370,21 +381,22 @@ static char f80u64[] = FROM_F80_1 "fistpq" FROM_F80_2 "mov -24(%rsp), %rax";
 static char f80f32[] = "fstps -8(%rsp); movss -8(%rsp), %xmm0";
 static char f80f64[] = "fstpl -8(%rsp); movsd -8(%rsp), %xmm0";
 
-static char *cast_table[][11] = {
-  // i8   i16     i32     i64     u8     u16     u32     u64     f32     f64     f80
-  {NULL,  NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i8
-  {i32i8, NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i16
-  {i32i8, i32i16, NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i32
-  {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i64f32, i64f64, i64f80}, // i64
+static char *cast_table[][12] = {
+  // v0  i8     i16     i32     i64     u8     u16     u32     u64     f32     f64     f80
+  {NULL, v0int, v0int,  v0int,  v0int,  v0int, v0int,  v0int,  v0int,  v0f32,  v0f64,  v0f80}, // v0
+  {NULL, NULL,  NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i8
+  {NULL, i32i8, NULL,   NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i16
+  {NULL, i32i8, i32i16, NULL,   i32i64, i32u8, i32u16, NULL,   i32i64, i32f32, i32f64, i32f80}, // i32
+  {NULL, i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   i64f32, i64f64, i64f80}, // i64
 
-  {i32i8, NULL,   NULL,   i32i64, NULL,  NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u8
-  {i32i8, i32i16, NULL,   i32i64, i32u8, NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u16
-  {i32i8, i32i16, NULL,   u32i64, i32u8, i32u16, NULL,   u32i64, u32f32, u32f64, u32f80}, // u32
-  {i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   u64f32, u64f64, u64f80}, // u64
+  {NULL, i32i8, NULL,   NULL,   i32i64, NULL,  NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u8
+  {NULL, i32i8, i32i16, NULL,   i32i64, i32u8, NULL,   NULL,   i32i64, i32f32, i32f64, i32f80}, // u16
+  {NULL, i32i8, i32i16, NULL,   u32i64, i32u8, i32u16, NULL,   u32i64, u32f32, u32f64, u32f80}, // u32
+  {NULL, i32i8, i32i16, NULL,   NULL,   i32u8, i32u16, NULL,   NULL,   u64f32, u64f64, u64f80}, // u64
 
-  {f32i8, f32i16, f32i32, f32i64, f32u8, f32u16, f32u32, f32u64, NULL,   f32f64, f32f80}, // f32
-  {f64i8, f64i16, f64i32, f64i64, f64u8, f64u16, f64u32, f64u64, f64f32, NULL,   f64f80}, // f64
-  {f80i8, f80i16, f80i32, f80i64, f80u8, f80u16, f80u32, f80u64, f80f32, f80f64, NULL},   // f80
+  {NULL, f32i8, f32i16, f32i32, f32i64, f32u8, f32u16, f32u32, f32u64, NULL,   f32f64, f32f80}, // f32
+  {NULL, f64i8, f64i16, f64i32, f64i64, f64u8, f64u16, f64u32, f64u64, f64f32, NULL,   f64f80}, // f64
+  {NULL, f80i8, f80i16, f80i32, f80i64, f80u8, f80u16, f80u32, f80u64, f80f32, f80f64, NULL},   // f80
 };
 
 static void cast(Type *from, Type *to) {
