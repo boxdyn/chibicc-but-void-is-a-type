@@ -1,6 +1,6 @@
 #include "chibicc.h"
 
-Type *ty_void = &(Type){TY_VOID, 1, 1};
+Type *ty_void = &(Type){TY_VOID, 0, 1};
 Type *ty_bool = &(Type){TY_BOOL, 1, 1};
 
 Type *ty_char = &(Type){TY_CHAR, 1, 1};
@@ -243,12 +243,8 @@ void add_type(Node *node) {
     node->ty = node->var->ty;
     return;
   case ND_COND:
-    if (node->then->ty->kind == TY_VOID || node->els->ty->kind == TY_VOID) {
-      node->ty = ty_void;
-    } else {
-      usual_arith_conv(&node->then, &node->els);
-      node->ty = node->then->ty;
-    }
+    usual_arith_conv(&node->then, &node->els);
+    node->ty = node->then->ty;
     return;
   case ND_COMMA:
     node->ty = node->rhs->ty;
@@ -267,8 +263,6 @@ void add_type(Node *node) {
   case ND_DEREF:
     if (!node->lhs->ty->base)
       error_tok(node->tok, "invalid pointer dereference");
-    if (node->lhs->ty->base->kind == TY_VOID)
-      error_tok(node->tok, "dereferencing a void pointer");
 
     node->ty = node->lhs->ty->base;
     return;
@@ -282,7 +276,7 @@ void add_type(Node *node) {
         return;
       }
     }
-    error_tok(node->tok, "statement expression returning void is not supported");
+    node->ty = ty_void;
     return;
   case ND_LABEL_VAL:
     node->ty = pointer_to(ty_void);
