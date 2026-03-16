@@ -69,6 +69,7 @@ static HashMap macros;
 static CondIncl *cond_incl;
 static HashMap pragma_once;
 static int include_next_idx;
+static bool macros_are_brace_aware = false;
 
 static Token *preprocess2(Token *tok);
 static Macro *find_macro(Token *tok);
@@ -229,9 +230,18 @@ static Token *new_str_token(char *str, Token *tmpl) {
 static Token *copy_line(Token **rest, Token *tok) {
   Token head = {};
   Token *cur = &head;
+  int curlies = 0, parens = 0, squares = 0;
 
-  for (; !tok->at_bol; tok = tok->next)
+  for (; !tok->at_bol || curlies || parens || squares; tok = tok->next) {
     cur = cur->next = copy_token(tok);
+    if (!macros_are_brace_aware) ;
+    else if (equal(cur, "{")) ++curlies;
+    else if (equal(cur, "}")) --curlies;
+    else if (equal(cur, "(")) ++parens;
+    else if (equal(cur, ")")) --parens;
+    else if (equal(cur, "[")) ++squares;
+    else if (equal(cur, "]")) --squares;
+  }
 
   cur->next = new_eof(tok);
   *rest = tok;
@@ -805,7 +815,11 @@ static Token *include_file(Token *tok, char *path, Token *filename_tok) {
   if (guard_name && hashmap_get(&macros, guard_name))
     return tok;
 
+  bool macros_were_brace_aware = macros_are_brace_aware;
+  macros_are_brace_aware = false;
   Token *tok2 = tokenize_file(path);
+  macros_are_brace_aware = macros_were_brace_aware;
+
   if (!tok2)
     error_tok(filename_tok, "%s: cannot open file: %s", path, strerror(errno));
 
@@ -969,6 +983,15 @@ static Token *preprocess2(Token *tok) {
       continue;
     }
 
+    if (equal(tok, "pragma") && equal(tok->next, "brace_aware")) {
+      tok = tok->next->next;
+      macros_are_brace_aware = equal(tok, "true") ? true
+        : equal(tok, "false") ? false
+        : eval_const_expr(&tok, tok);
+      tok = skip_line(tok->next);
+      continue;
+    }
+
     if (equal(tok, "pragma")) {
       do {
         tok = tok->next;
@@ -1004,11 +1027,16 @@ static Macro *add_builtin(char *name, macro_handler_fn *fn) {
   m->handler = fn;
   return m;
 }
-
+#define _XOPEN_SOURCE
+extern char *realpath (const char *__restrict __name,
+    char *__restrict __resolved) __THROW __wur;
 static Token *file_macro(Token *tmpl) {
   while (tmpl->origin)
     tmpl = tmpl->origin;
-  return new_str_token(tmpl->file->display_name, tmpl);
+  return new_str_token(
+    realpath(tmpl->file->display_name, NULL) ?: tmpl->file->display_name,
+    tmpl
+  );
 }
 
 static Token *line_macro(Token *tmpl) {
