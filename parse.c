@@ -851,8 +851,6 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
       tok = skip(tok, ",");
 
     Type *ty = declarator(&tok, tok, basety);
-    if (ty->kind == TY_VOID)
-      error_tok(tok, "variable declared void");
     if (!ty->name)
       error_tok(ty->name_pos, "variable name omitted");
 
@@ -898,8 +896,6 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
 
     if (var->ty->size < 0)
       error_tok(ty->name, "variable has incomplete type");
-    if (var->ty->kind == TY_VOID)
-      error_tok(ty->name, "variable declared void");
   }
 
   Node *node = new_node(ND_BLOCK, tok);
