@@ -1027,9 +1027,7 @@ static Macro *add_builtin(char *name, macro_handler_fn *fn) {
   m->handler = fn;
   return m;
 }
-#define _XOPEN_SOURCE
-extern char *realpath (const char *__restrict __name,
-    char *__restrict __resolved) __THROW __wur;
+
 static Token *file_macro(Token *tmpl) {
   while (tmpl->origin)
     tmpl = tmpl->origin;
