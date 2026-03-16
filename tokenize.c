@@ -509,10 +509,15 @@ Token *tokenize(File *file) {
 
     // Skip block comments.
     if (startswith(p, "/*")) {
-      char *q = strstr(p + 2, "*/");
-      if (!q)
-        error_at(p, "unclosed block comment");
-      p = q + 2;
+      char *q = p + 2;
+      int depth = 1;
+      while (*q && depth) switch(*q) {
+        case '\0': error_at(p, "unclosed block comment");
+        case '/': q += q[1] == '*' ? (depth += 1), 2 : 1; break;
+        case '*': q += q[1] == '/' ? (depth -= 1), 2 : 1; break;
+        default: ++q;
+      }
+      p = q;
       has_space = true;
       continue;
     }
