@@ -354,6 +354,15 @@ static Type *find_typedef(Token *tok) {
   return NULL;
 }
 
+static Node *auto_dereference (Node *node, Token *tok) {
+    if (!node->ty) add_type(node);
+    while (node->ty->kind == TY_PTR) {
+        node = new_unary(ND_DEREF, node, tok);
+        if (!node->ty) add_type(node);
+    }
+    return node;
+}
+
 static void push_tag_scope(Token *tok, Type *ty) {
   hashmap_put2(&scope->tags, tok->loc, tok->len, ty);
 }
@@ -2837,6 +2846,7 @@ static Node *postfix(Token **rest, Token *tok) {
     }
 
     if (equal(tok, ".")) {
+      node = auto_dereference(node, tok);
       node = struct_ref(node, tok->next);
       tok = tok->next->next;
       continue;
@@ -2845,6 +2855,7 @@ static Node *postfix(Token **rest, Token *tok) {
     if (equal(tok, "->")) {
       // x->y is short for (*x).y
       node = new_unary(ND_DEREF, node, tok);
+      node = auto_dereference(node, tok);
       node = struct_ref(node, tok->next);
       tok = tok->next->next;
       continue;
