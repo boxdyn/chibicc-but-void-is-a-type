@@ -1639,7 +1639,6 @@ static Node *stmt(Token **rest, Token *tok) {
 
   if (equal(tok, "for")) {
     Node *node = new_node(ND_FOR, tok);
-    tok = skip(tok->next, "(");
 
     enter_scope();
 
@@ -1648,20 +1647,22 @@ static Node *stmt(Token **rest, Token *tok) {
     brk_label = node->brk_label = new_unique_name();
     cont_label = node->cont_label = new_unique_name();
 
-    if (is_typename(tok)) {
-      Type *basety = declspec(&tok, tok, NULL);
-      node->init = declaration(&tok, tok, basety, NULL);
-    } else {
-      node->init = expr_stmt(&tok, tok);
+    if (consume(&tok, tok->next, "(")) {
+      if (is_typename(tok)) {
+        Type *basety = declspec(&tok, tok, NULL);
+        node->init = declaration(&tok, tok, basety, NULL);
+      } else {
+        node->init = expr_stmt(&tok, tok);
+      }
+
+      if (!equal(tok, ";"))
+        node->cond = expr(&tok, tok);
+      tok = skip(tok, ";");
+
+      if (!equal(tok, ")"))
+        node->inc = expr(&tok, tok);
+      tok = skip(tok, ")");
     }
-
-    if (!equal(tok, ";"))
-      node->cond = expr(&tok, tok);
-    tok = skip(tok, ";");
-
-    if (!equal(tok, ")"))
-      node->inc = expr(&tok, tok);
-    tok = skip(tok, ")");
 
     node->then = stmt(rest, tok);
 
