@@ -1028,6 +1028,10 @@ static Macro *add_builtin(char *name, macro_handler_fn *fn) {
   return m;
 }
 
+static Token *are_macros_brace_aware(Token *tmpl) {
+  return new_num_token(macros_are_brace_aware, tmpl);
+}
+
 static Token *file_macro(Token *tmpl) {
   while (tmpl->origin)
     tmpl = tmpl->origin;
@@ -1125,7 +1129,9 @@ void init_macros(void) {
   define_macro("__x86_64__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
+  define_macro("__HAS_BRACE_AWARE_MACROS", "1");
 
+  add_builtin("__MACROS_ARE_BRACE_AWARE", are_macros_brace_aware);
   add_builtin("__FILE__", file_macro);
   add_builtin("__LINE__", line_macro);
   add_builtin("__COUNTER__", counter_macro);
