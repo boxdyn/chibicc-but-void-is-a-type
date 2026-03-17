@@ -24,6 +24,20 @@
 
 #include "chibicc.h"
 
+/**
+ * @brief `pragma macro` extension flags for the preprocessor.
+ *
+ * These may be captured by macros and restored during macro expansion.
+ */
+struct MacroExtensions {
+  // Whether the preprocessor is counting "matched" braces in `copy_line`
+  bool brace_aware;
+  // Whether the preprocessor will expand a macro recursively. (per-macro.)
+  bool recursive;
+} typedef MacroExtensions;
+
+MacroExtensions macros_are;
+
 typedef struct MacroParam MacroParam;
 struct MacroParam {
   MacroParam *next;
@@ -44,6 +58,7 @@ typedef struct Macro Macro;
 struct Macro {
   char *name;
   bool is_objlike; // Object-like or function-like
+  MacroExtensions extensions; // [EXTENSION]: declaration site `pragma macro` flags
   MacroParam *params;
   char *va_args_name;
   Token *body;
@@ -69,7 +84,6 @@ static HashMap macros;
 static CondIncl *cond_incl;
 static HashMap pragma_once;
 static int include_next_idx;
-static bool macros_are_brace_aware = false;
 
 static Token *preprocess2(Token *tok);
 static Macro *find_macro(Token *tok);
@@ -234,7 +248,8 @@ static Token *copy_line(Token **rest, Token *tok) {
 
   for (; !tok->at_bol || curlies || parens || squares; tok = tok->next) {
     cur = cur->next = copy_token(tok);
-    if (!macros_are_brace_aware) ;
+    // [EXTENSION]: Use simplified heuristic for matched-brace detection
+    if (!macros_are.brace_aware) ;
     else if (equal(cur, "{")) ++curlies;
     else if (equal(cur, "}")) --curlies;
     else if (equal(cur, "(")) ++parens;
@@ -337,6 +352,7 @@ static Macro *add_macro(char *name, bool is_objlike, Token *body) {
   Macro *m = calloc(1, sizeof(Macro));
   m->name = name;
   m->is_objlike = is_objlike;
+  m->extensions = macros_are;
   m->body = body;
   hashmap_put(&macros, name, m);
   return m;
@@ -638,11 +654,12 @@ static Token *subst(Token *tok, MacroArg *args) {
 // If tok is a macro, expand it and return true.
 // Otherwise, do nothing and return false.
 static bool expand_macro(Token **rest, Token *tok) {
-  if (hideset_contains(tok->hideset, tok->loc, tok->len))
-    return false;
-
   Macro *m = find_macro(tok);
   if (!m)
+    return false;
+
+  // [EXTENSION]: macros which are defined at a recursive site must expand recursively
+  if (!m->extensions.recursive && hideset_contains(tok->hideset, tok->loc, tok->len))
     return false;
 
   // Built-in dynamic macro application such as __LINE__
@@ -815,11 +832,7 @@ static Token *include_file(Token *tok, char *path, Token *filename_tok) {
   if (guard_name && hashmap_get(&macros, guard_name))
     return tok;
 
-  bool macros_were_brace_aware = macros_are_brace_aware;
-  macros_are_brace_aware = false;
   Token *tok2 = tokenize_file(path);
-  macros_are_brace_aware = macros_were_brace_aware;
-
   if (!tok2)
     error_tok(filename_tok, "%s: cannot open file: %s", path, strerror(errno));
 
@@ -983,13 +996,21 @@ static Token *preprocess2(Token *tok) {
       continue;
     }
 
-    if (equal(tok, "pragma") && equal(tok->next, "brace_aware")) {
-      tok = tok->next->next;
-      macros_are_brace_aware = equal(tok, "true") ? true
-        : equal(tok, "false") ? false
-        : eval_const_expr(&tok, tok);
-      tok = skip_line(tok->next);
-      continue;
+    // [EXTENSION]: `pragma macro` allows toggling brace-awareness, etc.
+    if (equal(tok, "pragma") && consume(&tok, tok->next, "macro")) {
+      if (consume(&tok, tok, "brace_aware")) {
+        macros_are.brace_aware = equal(tok, "true") ? true
+          : equal(tok, "false") ? false
+          : eval_const_expr(&tok, tok);
+        tok = skip_line(tok->next);
+        continue;
+      } else if (consume(&tok, tok, "recursive")) {
+        macros_are.recursive = equal(tok, "true") ? true
+          : equal(tok, "false") ? false
+          : eval_const_expr(&tok, tok);
+        tok = skip_line(tok->next);
+        continue;
+      }
     }
 
     if (equal(tok, "pragma")) {
@@ -1028,8 +1049,18 @@ static Macro *add_builtin(char *name, macro_handler_fn *fn) {
   return m;
 }
 
-static Token *are_macros_brace_aware(Token *tmpl) {
-  return new_num_token(macros_are_brace_aware, tmpl);
+/**
+ * @brief Gets information about currently-enabled `pragma macro` features
+ *
+ * @param tmpl the source token which invoked this builtin
+ * @return Token* the status of the queried feature (0 for off, 1 for on)
+ */
+static Token *are_macros(Token *tmpl) {
+  if (equal(tmpl, "__MACROS_ARE_BRACE_AWARE"))
+    return new_num_token(macros_are.brace_aware, tmpl);
+  if (equal(tmpl, "__MACROS_ARE_RECURSIVE"))
+    return new_num_token(macros_are.recursive, tmpl);
+  unreachable();
 }
 
 static Token *file_macro(Token *tmpl) {
@@ -1129,9 +1160,12 @@ void init_macros(void) {
   define_macro("__x86_64__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
-  define_macro("__HAS_BRACE_AWARE_MACROS", "1");
 
-  add_builtin("__MACROS_ARE_BRACE_AWARE", are_macros_brace_aware);
+  // [EXTENSION]: feature tests and `pragma macro` information
+  define_macro("__VOID_CHIBICC", "1");
+  add_builtin("__MACROS_ARE_BRACE_AWARE", are_macros);
+  add_builtin("__MACROS_ARE_RECURSIVE", are_macros);
+
   add_builtin("__FILE__", file_macro);
   add_builtin("__LINE__", line_macro);
   add_builtin("__COUNTER__", counter_macro);
